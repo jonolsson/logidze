@@ -7,16 +7,21 @@ require "logidze/version"
 module Logidze
   require "logidze/history"
   require "logidze/model"
-  require "logidze/versioned_association"
+  require "logidze/model/time_helper"
+  require "logidze/model/sequel"
+  # require "logidze/versioned_association"
   require "logidze/ignore_log_data"
   require "logidze/has_logidze"
-  require "logidze/meta"
+  # require "logidze/meta"
+  require "logidze/connection_adapter/base"
+  require "logidze/connection_adapter/sequel"
 
-  extend Logidze::Meta
+  # extend Logidze::Meta
 
   require "logidze/engine" if defined?(Rails)
 
   class << self
+    attr_accessor :default_connection_adapter
     # Determines if Logidze should append a version to the log after updating an old version.
     attr_accessor :append_on_undo
     # Determines whether associations versioning is enabled or not
@@ -30,41 +35,73 @@ module Logidze
     # Determines what Logidze should do when upgrade is needed (:raise | :warn | :ignore)
     attr_reader :on_pending_upgrade
 
+    def on_pending_upgrade=(mode)
+      if !%i[raise warn ignore].include? mode
+        raise ArgumentError,
+          "Unknown on_pending_upgrade option `#{mode.inspect}`. Expecting :raise, :warn or :ignore"
+      end
+      @on_pending_upgrade = mode
+    end
+
+    # CONNECTION_ADAPTERS = {active_record: ConnectionAdapter::ActiveRecord, sequel: ConnectionAdapter::Sequel}.freeze
+    CONNECTION_ADAPTERS = {sequel: ConnectionAdapter::Sequel}.freeze
+
+    # Access connection adapter for manupulations.
+    #
+    # @example
+    #   Logidze[:active_record].without_logging { Post.update_all(active: true) }
+    def [](connection_adapter)
+      CONNECTION_ADAPTERS.fetch(connection_adapter.to_sym)
+    end
+    
     # Temporary disable DB triggers.
     #
     # @example
     #   Logidze.without_logging { Post.update_all(active: true) }
-    def without_logging
-      with_logidze_setting("logidze.disabled", "on") { yield }
+    def without_logging(&block)
+      # with_logidze_setting("logidze.disabled", "on") { yield }
+      self[default_connection_adapter].without_logging(&block)
     end
 
     # Instruct Logidze to create a full snapshot for the new versions, not a diff
     #
     # @example
     #   Logidze.with_full_snapshot { post.touch }
-    def with_full_snapshot
-      with_logidze_setting("logidze.full_snapshot", "on") { yield }
+    def with_full_snapshot(&block)
+      self[default_connection_adapter].with_full_snapshot(&block)
+      # with_logidze_setting("logidze.full_snapshot", "on") { yield }
     end
 
-    def on_pending_upgrade=(mode)
-      if %i[raise warn ignore].exclude? mode
-        raise ArgumentError, "Unknown on_pending_upgrade option `#{mode.inspect}`. Expecting :raise, :warn or :ignore"
-      end
-      @on_pending_upgrade = mode
+    # Store special meta information about changes' author inside the version (Responsible ID).
+    # Usually, you would like to store the `current_user.id` that way
+    # (default connection adapter).
+    #
+    # @example
+    #   Logidze.with_responsible(user.id) { post.save! }
+    def with_responsible(responsible_id, transactional: true, &block)
+      self[default_connection_adapter].with_responsible(responsible_id, transactional: transactional, &block)
     end
 
-    private
+    # def on_pending_upgrade=(mode)
+    #   if %i[raise warn ignore].exclude? mode
+    #     raise ArgumentError, "Unknown on_pending_upgrade option `#{mode.inspect}`. Expecting :raise, :warn or :ignore"
+    #   end
+    #   @on_pending_upgrade = mode
+    # end
 
-    def with_logidze_setting(name, value)
-      ActiveRecord::Base.transaction do
-        ActiveRecord::Base.connection.execute "SET LOCAL #{name} TO #{value};"
-        res = yield
-        ActiveRecord::Base.connection.execute "SET LOCAL #{name} TO DEFAULT;"
-        res
-      end
-    end
+    # private
+
+    # def with_logidze_setting(name, value)
+    #   ActiveRecord::Base.transaction do
+    #     ActiveRecord::Base.connection.execute "SET LOCAL #{name} TO #{value};"
+    #     res = yield
+    #     ActiveRecord::Base.connection.execute "SET LOCAL #{name} TO DEFAULT;"
+    #     res
+    #   end
+    # end
   end
 
+  self.default_connection_adapter = :sequel
   self.append_on_undo = false
   self.associations_versioning = false
   self.ignore_log_data_by_default = false

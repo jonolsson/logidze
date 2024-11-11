@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "active_support/core_ext/module/delegation"
+# require "active_support/core_ext/module/delegation"
 
 module Logidze
   # Log data wrapper
@@ -14,8 +14,19 @@ module Logidze
 
     attr_reader :data
 
-    delegate :size, to: :versions
-    delegate :responsible_id, :meta, to: :current_version
+    # delegate :size, to: :versions
+    # delegate :responsible_id, :meta, to: :current_version
+    def size
+      versions.size
+    end
+
+    def responsible_id
+      current_version.responsible_id
+    end
+
+    def meta
+      current_version.meta
+    end
 
     def initialize(data)
       @data = data
