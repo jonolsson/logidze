@@ -13,7 +13,7 @@ module Logidze
         @mutex = Mutex.new
       end
 
-      delegate :connection, to: ActiveRecord::Base
+      # delegate :connection, to: ActiveRecord::Base
 
       def call(env)
         @mutex.synchronize do
